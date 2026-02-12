@@ -1,19 +1,25 @@
-# ESPHome Zigbee Laser Flower Monitor (XIAO nRF52840 + VL53L0X)
+# ESPHome Zigbee Laser Flower Monitor - Poweroff Managed by TPL5110
 
 This project publishes:
 - distance (mm)
 - battery voltage (V)
 - battery (%)
 
-Measurement interval is configured to **4 hours**.
+This variant is designed for external power gating with **TPL5110**.
+The MCU is fully powered off between wake cycles.
 
 ## Hardware
 - Seeed Studio XIAO nRF52840 Sense (`xiao_ble` in ESPHome)
 - VL53L0X ToF sensor
+- TPL5110 power timer
 
 I2C pins used here:
 - `SDA: P1.13`
 - `SCL: P1.14`
+
+TPL5110 control wiring:
+- `DONE` from TPL5110 -> `P1.12` (XIAO pin 112)
+- Firmware keeps this pin LOW while running and sets it HIGH to shut power off.
 
 ## ESPHome file
 Main firmware config (master):
@@ -52,8 +58,12 @@ mosquitto_pub -h <MQTT_HOST> -u <MQTT_USER> -P <MQTT_PASS> \
   -m '{"id":"<YOUR_FRIENDLY_NAME>"}'
 ```
 
-## Known limitation (power)
-With direct C-code power tweaks (radio + USB/UART handling), the measured current draw is about **~1.33 mA** on this XIAO nRF52840 board. In practice this seems to be the lowest stable level reached so far on this hardware with current ESPHome Zigbee support.
+## Power behavior
+Using TPL5110 power gating gives the lowest standby drain, because the board is fully switched off between wakeups.
+
+Expected battery life on **CR2032** is approximately **2-3 years** (depends on wake interval, Zigbee join time, RF conditions, and battery quality).
+
+Without external power gating, measured current with ESPHome Zigbee on this board was about **~1.33 mA** in the best tested setup.
 
 For an ultra-low-power reference (about 6 months per charge), see the MQTT/Wi-Fi (ESP32-C6) version, which still has lower drain:
 https://github.com/jbrepogmailcom/flower-fading-monitor
