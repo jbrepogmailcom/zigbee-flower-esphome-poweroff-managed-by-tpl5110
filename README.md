@@ -22,15 +22,12 @@ TPL5110 control wiring:
 - Firmware keeps this pin LOW while running and sets it HIGH to shut power off.
 
 ## ESPHome file
-Main firmware config (master):
-- `zigbee_flower-lp.yaml`
-
-Compatibility copy:
-- `zigbee_flower.yaml`
+Main firmware config:
+- `zigbee_flower_tpl5110_v3.yaml`
 
 Compile example:
 ```bash
-esphome compile zigbee_flower-lp.yaml
+esphome compile zigbee_flower_tpl5110_v3.yaml
 ```
 
 ## Zigbee2MQTT converter
@@ -64,9 +61,6 @@ Using TPL5110 power gating gives the lowest standby drain, because the board is 
 Expected battery life on **CR2032** is approximately **2-3 years** (depends on wake interval, Zigbee join time, RF conditions, and battery quality).
 
 Without external power gating, measured current with ESPHome Zigbee on this board was about **~1.33 mA** in the best tested setup.
-
-For an ultra-low-power reference (about 6 months per charge), see the MQTT/Wi-Fi (ESP32-C6) version, which still has lower drain:
-https://github.com/jbrepogmailcom/flower-fading-monitor
 
 ## Home Assistant hint
 `distance` can be used for automation, e.g. trigger alert when flower leaves are dropping too fast.
