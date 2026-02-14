@@ -23,12 +23,28 @@ TPL5110 control wiring:
 
 ## ESPHome file
 Main firmware config:
+- `zigbee_flower_tpl5110_v5.yaml`
+
+Previous baseline:
 - `zigbee_flower_tpl5110_v3.yaml`
 
 Compile example:
 ```bash
-esphome compile zigbee_flower_tpl5110_v3.yaml
+esphome compile zigbee_flower_tpl5110_v5.yaml
 ```
+
+## What Changed vs v3
+- Measurement is done **before Zigbee join** and cached.
+- Publish happens **only after joined** (`battery`, `%`, `distance`), then DONE is asserted.
+- Added fast reconnect strategy (`REJOIN` first, periodic `STEERING` fallback).
+- Added ToF cycle diagnostics:
+  - update calls count
+  - filter input count
+  - filter output count
+- ToF averaging tuned to `20` samples with `60ms` spacing (`timing_budget 50ms + 10ms margin`).
+- Distance publish path decoupled:
+  - internal raw ToF sensor (`Distance_Raw`)
+  - exposed cached publish sensor (`Distance`).
 
 ## Zigbee2MQTT converter
 Converter file:

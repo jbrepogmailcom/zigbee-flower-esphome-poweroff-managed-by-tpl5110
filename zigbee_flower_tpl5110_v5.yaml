@@ -1,0 +1,299 @@
+substitutions:
+  logger_baud: "115200"
+  post_report_awake_time: 100ms
+  join_timeout_ms: "120000"
+  rejoin_retry_ms: "5000"
+
+esphome:
+  name: nrf52840-zigbee-tof
+  friendly_name: nRF52840 Zigbee ToF
+  on_boot:
+    priority: -100
+    then:
+      - output.turn_off: tpl_done
+      - output.turn_on: led_red
+      - output.turn_off: led_green
+      - output.turn_off: led_blue
+      - delay: 200ms
+      - output.turn_off: led_red
+      - output.turn_on: led_green
+      - output.turn_off: led_blue
+      - delay: 200ms
+      - output.turn_off: led_red
+      - output.turn_off: led_green
+      - output.turn_on: led_blue
+      - delay: 200ms
+      - output.turn_off: led_red
+      - output.turn_off: led_green
+      - output.turn_off: led_blue
+      - lambda: |-
+          id(boot_ms) = millis();
+      - script.execute: pre_measure_cache
+
+nrf52:
+  board: xiao_ble
+
+logger:
+  baud_rate: ${logger_baud}
+  level: DEBUG
+
+zigbee:
+  power_source: BATTERY
+  wipe_on_boot: false
+
+preferences:
+  flash_write_interval: never
+
+output:
+  - platform: gpio
+    id: led_red
+    pin:
+      number: P0.26
+      inverted: true
+  - platform: gpio
+    id: led_green
+    pin:
+      number: P0.30
+      inverted: true
+  - platform: gpio
+    id: led_blue
+    pin:
+      number: P0.06
+      inverted: true
+  - platform: gpio
+    id: tpl_done
+    pin:
+      number: P1.12
+      inverted: false
+
+globals:
+  - id: pre_measure_done
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: first_measure_done
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: boot_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: "0"
+  - id: blue_blink_state
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: measure_in_progress
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: join_attempt
+    type: uint32_t
+    restore_value: no
+    initial_value: "0"
+  - id: tof_update_calls
+    type: uint32_t
+    restore_value: no
+    initial_value: "0"
+  - id: tof_filter_input_count
+    type: uint32_t
+    restore_value: no
+    initial_value: "0"
+  - id: tof_filtered_publishes
+    type: uint32_t
+    restore_value: no
+    initial_value: "0"
+  - id: cached_distance_mm
+    type: float
+    restore_value: no
+    initial_value: "0.0"
+
+i2c:
+  sda: P1.13
+  scl: P1.14
+  scan: false
+  frequency: 100kHz
+
+sensor:
+  - platform: vl53l0x
+    id: tof_raw
+    name: "Distance_Raw"
+    internal: true
+    address: 0x29
+    timing_budget: 50ms
+    timeout: 100ms
+    unit_of_measurement: "mm"
+    accuracy_decimals: 1
+    update_interval: never
+    filters:
+      - lambda: |-
+          id(tof_filter_input_count)++;
+          return x;
+      - multiply: 1000.0
+      - sliding_window_moving_average:
+          window_size: 20
+          send_every: 20
+          send_first_at: 20
+    on_value:
+      then:
+        - lambda: |-
+            id(tof_filtered_publishes)++;
+
+  - platform: template
+    id: tof_distance
+    name: "Distance"
+    unit_of_measurement: "mm"
+    accuracy_decimals: 1
+    update_interval: never
+
+  - platform: adc
+    id: batt_v_raw
+    pin: P0.02
+    update_interval: never
+
+  - platform: template
+    id: batt_v
+    name: "Battery_Voltage"
+    unit_of_measurement: "V"
+    update_interval: never
+    lambda: |-
+      return id(batt_v_raw).state * 6.6327;
+
+  - platform: template
+    id: batt_pct
+    name: "Battery"
+    unit_of_measurement: "%"
+    update_interval: never
+    lambda: |-
+      float v = id(batt_v).state;
+      float pct = (v - 2.2f) / (3.0f - 2.2f) * 100.0f;
+      if (pct < 0.0f) pct = 0.0f;
+      if (pct > 100.0f) pct = 100.0f;
+      return pct;
+
+script:
+  - id: ensure_join_or_pair
+    mode: restart
+    then:
+      - lambda: |-
+          if (!zb_zdo_joined()) {
+            // Fast path: rejoin using stored network context (no full scan).
+            // Fallback: every 6th attempt, run steering for unknown/new networks.
+            if ((id(join_attempt) % 6U) == 5U) {
+              ESP_LOGD("pairing", "Not joined, fallback steering attempt");
+              bdb_start_top_level_commissioning(ZB_BDB_NETWORK_STEERING);
+            } else {
+              ESP_LOGD("pairing", "Not joined, trying fast rejoin");
+              bdb_start_top_level_commissioning(ZB_BDB_REJOIN);
+            }
+            id(join_attempt)++;
+          }
+
+  - id: pre_measure_cache
+    mode: single
+    then:
+      - logger.log: "Starting pre-measure before Zigbee join"
+      - lambda: |-
+          id(measure_in_progress) = true;
+      - lambda: |-
+          id(tof_update_calls) = 0;
+          id(tof_filter_input_count) = 0;
+          id(tof_filtered_publishes) = 0;
+      - component.update: batt_v_raw
+      - component.update: batt_v
+      - component.update: batt_pct
+      - repeat:
+          count: 20
+          then:
+            - lambda: |-
+                id(tof_update_calls)++;
+            - component.update: tof_raw
+            - delay: 60ms
+      - lambda: |-
+          id(cached_distance_mm) = id(tof_raw).state;
+          ESP_LOGD("tof_debug", "ToF cycle stats: update_calls=%u, filtered_publishes=%u, final_state=%.1f mm",
+                   (unsigned) id(tof_update_calls),
+                   (unsigned) id(tof_filtered_publishes),
+                   id(cached_distance_mm));
+          ESP_LOGI("tof_count", "ToF counts: updates=%u, filter_inputs=%u, filter_outputs=%u",
+                   (unsigned) id(tof_update_calls),
+                   (unsigned) id(tof_filter_input_count),
+                   (unsigned) id(tof_filtered_publishes));
+      - logger.log: "Pre-measure complete, waiting for Zigbee join to publish"
+      - lambda: |-
+          id(pre_measure_done) = true;
+          id(measure_in_progress) = false;
+
+  - id: publish_cached_and_shutdown
+    mode: single
+    then:
+      - lambda: |-
+          id(measure_in_progress) = true;
+      - lambda: |-
+          id(batt_v).publish_state(id(batt_v).state);
+          id(batt_pct).publish_state(id(batt_pct).state);
+          id(tof_distance).publish_state(id(cached_distance_mm));
+      - logger.log: "TPL5110 shutdown: setting DONE (P1.12) HIGH now"
+      - delay: ${post_report_awake_time}
+      - lambda: |-
+          id(measure_in_progress) = false;
+      - output.turn_off: led_green
+      - output.turn_on: tpl_done
+
+interval:
+  - interval: 200ms
+    then:
+      - if:
+          condition:
+            lambda: "return !zb_zdo_joined() && !id(first_measure_done);"
+          then:
+            - output.turn_on: led_blue
+            - delay: 10ms
+            - output.turn_off: led_blue
+          else:
+            - output.turn_off: led_blue
+
+  - interval: 500ms
+    then:
+      - if:
+          condition:
+            lambda: "return id(measure_in_progress);"
+          then:
+            - output.turn_on: led_green
+            - delay: 10ms
+            - output.turn_off: led_green
+          else:
+            - output.turn_off: led_green
+
+  - interval: 5s
+    then:
+      - if:
+          condition:
+            lambda: |-
+              return !zb_zdo_joined() && !id(first_measure_done) &&
+                     (millis() - id(boot_ms) >= ${join_timeout_ms}UL);
+          then:
+            - output.turn_off: led_blue
+            - logger.log: "Join timeout (2min) - shutting down via TPL5110 DONE"
+            - delay: 500ms
+            - output.turn_on: tpl_done
+
+  - interval: ${rejoin_retry_ms}ms
+    then:
+      - if:
+          condition:
+            lambda: "return id(pre_measure_done) && !zb_zdo_joined() && !id(first_measure_done);"
+          then:
+            - script.execute: ensure_join_or_pair
+
+  - interval: 1s
+    then:
+      - if:
+          condition:
+            lambda: "return zb_zdo_joined() && id(pre_measure_done) && !id(first_measure_done);"
+          then:
+            - output.turn_off: led_blue
+            - logger.log: "Joined detected - publishing cached measurement"
+            - lambda: "id(join_attempt) = 0;"
+            - script.execute: publish_cached_and_shutdown
+            - lambda: "id(first_measure_done) = true;"
