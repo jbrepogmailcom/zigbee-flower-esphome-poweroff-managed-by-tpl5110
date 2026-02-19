@@ -18,19 +18,21 @@ I2C pins used here:
 - `SCL: P1.14`
 
 TPL5110 control wiring:
-- `DONE` from TPL5110 -> `P1.12` (XIAO pin 112)
-- Firmware keeps this pin LOW while running and sets it HIGH to shut power off.
+- `DONE` from TPL5110 -> `P0.29` (XIAO pin 029-D3)
+- `P1.12` did not work reliably for DONE switching in this setup.
+- Firmware keeps DONE pin LOW while running and sets it HIGH to shut power off.
+- Added **47uF capacitor between `GND` and `DRV/VOUT`** on the TPL5110 module to stabilize MCU power-up.
 
 ## ESPHome file
 Main firmware config:
-- `zigbee_flower_tpl5110_v5.yaml`
+- `zigbee_flower_tpl5110_v6.yaml`
 
 Previous baseline:
 - `zigbee_flower_tpl5110_v3.yaml`
 
 Compile example:
 ```bash
-esphome compile zigbee_flower_tpl5110_v5.yaml
+esphome compile zigbee_flower_tpl5110_v6.yaml
 ```
 
 ## What Changed vs v3
@@ -74,7 +76,7 @@ mosquitto_pub -h <MQTT_HOST> -u <MQTT_USER> -P <MQTT_PASS> \
 ## Power behavior
 Using TPL5110 power gating gives the lowest standby drain, because the board is fully switched off between wakeups.
 
-Expected battery life on **CR2032** is approximately **2-3 years** (depends on wake interval, Zigbee join time, RF conditions, and battery quality).
+Expected battery life on **CR2032** is approximately **5 years** (depends on wake interval, Zigbee join time, RF conditions, and battery quality).
 
 Without external power gating, measured current with ESPHome Zigbee on this board was about **~1.33 mA** in the best tested setup.
 
